@@ -59,6 +59,8 @@ export function createCoreHealthMonitor(options) {
   let inFlight = null;
   let run = 0;
   const callbackContext = new AsyncLocalStorage();
+  // Idle monitors must not remain registered with Node's async hooks.
+  callbackContext.disable();
 
   async function invokeCallback(callback, ...args) {
     const context = { active: true };
@@ -102,6 +104,9 @@ export function createCoreHealthMonitor(options) {
         }
         return false;
       } finally {
+        // All callbacks have settled; run() re-enables storage on the next poll.
+        // Do not disable in stop(): callbacks may still need reentrancy guards.
+        callbackContext.disable();
         inFlight = null;
       }
     })().then(complete);

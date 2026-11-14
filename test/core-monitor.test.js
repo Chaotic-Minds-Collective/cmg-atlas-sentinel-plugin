@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { AsyncLocalStorage } from "node:async_hooks";
 import {
   createCoreHealthMonitor,
   SENTINEL_CORE_MONITOR_DEFAULTS
@@ -260,3 +261,51 @@ for (const callback of ["poll", "onSamples", "onError"]) {
     });
   }
 }
+
+
+test("idle monitors release async storage only after callbacks settle", async (t) => {
+  const enabled = new Set();
+  const originalRun = AsyncLocalStorage.prototype.run;
+  const originalDisable = AsyncLocalStorage.prototype.disable;
+  t.mock.method(AsyncLocalStorage.prototype, "run", function (...args) {
+    enabled.add(this);
+    return originalRun.apply(this, args);
+  });
+  t.mock.method(AsyncLocalStorage.prototype, "disable", function (...args) {
+    enabled.delete(this);
+    return originalDisable.apply(this, args);
+  });
+  let release;
+  const { monitor } = harness({
+    onSamples: () => new Promise((resolve) => { release = resolve; })
+  });
+  assert.equal(enabled.size, 0);
+  try {
+    monitor.start();
+    const pending = monitor.pollNow();
+    await new Promise((resolve) => setImmediate(resolve));
+    monitor.stop();
+    assert.equal(enabled.size, 1, "stop must retain guards for active callbacks");
+    release();
+    await pending;
+    assert.equal(enabled.size, 0);
+    // Repeatedly discarded monitors must not accumulate enabled storage.
+    for (let i = 0; i < 10; i += 1) {
+      const next = harness().monitor;
+      next.start();
+      await next.pollNow();
+      next.stop();
+      assert.equal(enabled.size, 0);
+    }
+    monitor.start();
+    const restarted = monitor.pollNow();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(enabled.size, 1, "restart re-enables callback tracking");
+    release();
+    await restarted;
+    assert.equal(enabled.size, 0);
+  } finally {
+    release?.();
+    monitor.stop();
+  }
+});
