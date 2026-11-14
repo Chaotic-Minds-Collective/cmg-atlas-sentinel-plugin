@@ -219,3 +219,44 @@ for (const fails of [false, true]) {
     monitor.stop();
   });
 }
+
+for (const callback of ["poll", "onSamples", "onError"]) {
+  for (const restart of [false, true]) {
+    test(`${callback} can await pollNow after an async boundary${restart ? " and restart" : ""}`, { timeout: 1_000 }, async () => {
+      let monitor;
+      let reentered = false;
+      let nestedResult;
+      const options = {
+        [callback]: async () => {
+          if (!reentered) {
+            reentered = true;
+            await new Promise((resolve) => setImmediate(resolve));
+            if (restart) {
+              monitor.stop();
+              monitor.start();
+            }
+            nestedResult = await monitor.pollNow();
+          }
+          return [];
+        }
+      };
+      if (callback === "onError") options.poll = () => { throw new Error("poll failed"); };
+      const h = harness(options);
+      monitor = h.monitor;
+      try {
+        monitor.start();
+        const pending = monitor.pollNow();
+        assert.equal(await pending, callback !== "onError");
+        // Drain restart work and verify subsequent ticks also make progress.
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.equal(nestedResult, false);
+        assert.equal(monitor.polling, false);
+        h.tick();
+        assert.equal(await monitor.pollNow(), callback !== "onError");
+        assert.equal(monitor.polling, false);
+      } finally {
+        monitor.stop();
+      }
+    });
+  }
+}

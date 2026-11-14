@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+
 /**
  * Lifecycle coordinator for Sentinel's read-only Core health poller.
  *
@@ -56,6 +58,18 @@ export function createCoreHealthMonitor(options) {
   let timer = null;
   let inFlight = null;
   let run = 0;
+  const callbackContext = new AsyncLocalStorage();
+
+  async function invokeCallback(callback, ...args) {
+    const context = { active: true };
+    return callbackContext.run(context, async () => {
+      try {
+        return await callback(...args);
+      } finally {
+        context.active = false;
+      }
+    });
+  }
 
   async function executePoll() {
     const pollRun = run;
@@ -72,16 +86,16 @@ export function createCoreHealthMonitor(options) {
     // Publish the operation before invoking caller code, which may throw.
     void (async () => {
       try {
-        const samples = await config.poll();
+        const samples = await invokeCallback(config.poll);
         if (!Array.isArray(samples)) {
           throw new TypeError("poll must resolve to an array of health samples");
         }
-        if (running && run === pollRun) await config.onSamples(samples);
+        if (running && run === pollRun) await invokeCallback(config.onSamples, samples);
         return true;
       } catch (error) {
         if (running && run === pollRun && config.onError) {
           try {
-            await config.onError(error);
+            await invokeCallback(config.onError, error);
           } catch {
             // An error reporter must not terminate the polling lifecycle.
           }
@@ -125,6 +139,9 @@ export function createCoreHealthMonitor(options) {
     if (!running) {
       throw new Error("monitor must be running before pollNow can be used");
     }
+    // A callback cannot wait for the operation that is awaiting that callback.
+    // Track async ancestry so unrelated callers still share in-flight work.
+    if (callbackContext.getStore()?.active) return Promise.resolve(false);
     return executePoll();
   }
 

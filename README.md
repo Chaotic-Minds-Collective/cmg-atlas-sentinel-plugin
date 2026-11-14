@@ -73,7 +73,14 @@ Core remains authoritative for shared identity, authorization and platform recor
 The next Sentinel milestone adds `src/core-monitor.js`:
 
 - Starts with one immediate poll, then uses a configurable interval (60 seconds by default).
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:f2071e75b666096d48469a6a968c20f8b6d85e7419de8a8ce8bb254a16a06fc5 -->
+
 - Prevents overlapping poll requests; concurrent manual and scheduled ticks share the in-flight operation.
+- A `pollNow()` call made from an active `poll`, `onSamples`, or `onError` callback (including across async boundaries) resolves to `false` without starting or joining work, avoiding a callback waiting on itself. Calls outside those callbacks continue to share in-flight work.
+
+<!-- /coderabbit-ai-generated:v1 -->
 - Delivers samples only while running and suppresses late results after shutdown.
 - Reports polling and sample-handler failures through an injected error callback without allowing a failing reporter to stop the scheduler.
 - Uses injected polling and timer functions so lifecycle behavior can be tested without contacting Core or waiting on real timers.
