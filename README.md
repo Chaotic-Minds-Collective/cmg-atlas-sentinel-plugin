@@ -38,6 +38,14 @@ The Core contract milestone adds `src/core-heartbeat-adapter.js`:
 - Requires explicit cluster, grid and server scope; Core's current public listing does not return cluster ID or provider grid ID.
 - Uses a fake Core response in tests only; it performs no HTTP requests.
 
+The explicit Core event consumer adds `src/core-event-consumer.js`:
+
+- Claims only the five event types covered by Sentinel's current default alert rules, using Core's exact-match event-type filter.
+- Validates server scope, event IDs and lease tokens, then invokes the existing metadata-only event classifier.
+- Requires an explicit scope resolver because legacy events can lack provider grid IDs; Core cluster/server scope must match the resolver.
+- Keeps claim and acknowledgement separate. The caller controls durable alert handling and acknowledgement.
+- Does not start a scheduler, persist alerts, send notifications, connect to Discord, invoke RCON or mutate game state.
+
 The read-only Core poller adds `src/core-poller.js`:\n\n- Performs one HTTPS GET to Core's public `/servers` endpoint with a bounded timeout, no-store caching and redirects disabled.\n- Requires an explicit caller-provided cluster/grid/server scope resolver; it does not infer stable IDs from display names.\n- Filters for ATLAS records, validates the response envelope and record count, and maps records through the tested heartbeat adapter.\n- Makes no retries, writes, authenticated requests, RCON calls or notifications.\n\nThese are read-only classifiers and contract adapters. The poller is a callable one-shot operation, not a scheduled monitor or production alert delivery service. A deployment still needs an approved Core origin, explicit scope mapping, secure runtime configuration and isolated connectivity validation.
 
 ## Development
@@ -86,3 +94,7 @@ The next Sentinel milestone adds `src/core-monitor.js`:
 - Uses injected polling and timer functions so lifecycle behavior can be tested without contacting Core or waiting on real timers.
 
 This is a library lifecycle coordinator, not an installed background service. The caller must explicitly start it and supply the existing read-only poller plus sample handling. It does not persist health, send alerts, invoke RCON, restart servers, or access a live endpoint.
+
+### Explicit Core event consumer
+
+See [`docs/CORE_EVENT_CONSUMER.md`](docs/CORE_EVENT_CONSUMER.md) for the filtered claim client and caller-controlled acknowledgement contract. It is separate from health polling and does not auto-start.
