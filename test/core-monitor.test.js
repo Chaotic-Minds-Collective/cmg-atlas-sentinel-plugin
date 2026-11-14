@@ -162,3 +162,60 @@ test("an error callback failure does not break the monitor", async () => {
   assert.equal(attempts, 1);
   monitor.stop();
 });
+
+test("synchronous poll failures without onError recover on a later tick", async () => {
+  let attempts = 0;
+  const { monitor, calls, tick } = harness({
+    onError: undefined,
+    poll: () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("synchronous failure");
+      return [];
+    }
+  });
+  monitor.start();
+  // Let the initial operation settle without initiating another poll.
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(monitor.polling, false);
+  tick();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(attempts, 2);
+  assert.equal(calls.samples.length, 1);
+  assert.equal(monitor.polling, false);
+  monitor.stop();
+  monitor.start();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(attempts, 3);
+  monitor.stop();
+});
+
+for (const fails of [false, true]) {
+  test(`restart discards previous run's ${fails ? "errors" : "samples"} without overlapping polls`, async () => {
+    let settle;
+    let attempts = 0;
+    const { monitor, calls, tick } = harness({
+      poll: () => {
+        attempts += 1;
+        if (attempts > 1) return [{ id: "fresh" }];
+        return new Promise((resolve, reject) => {
+          settle = () => fails ? reject(new Error("stale")) : resolve([{ id: "stale" }]);
+        });
+      }
+    });
+    monitor.start();
+    const previous = monitor.pollNow();
+    monitor.stop();
+    monitor.start();
+    const current = monitor.pollNow();
+    tick();
+    assert.equal(attempts, 1);
+    settle();
+    assert.equal(await previous, !fails);
+    assert.equal(await current, true);
+    assert.equal(attempts, 2);
+    assert.deepEqual(calls.samples, [[{ id: "fresh" }]]);
+    assert.deepEqual(calls.errors, []);
+    assert.equal(monitor.polling, false);
+    monitor.stop();
+  });
+}

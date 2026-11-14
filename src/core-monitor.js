@@ -55,19 +55,31 @@ export function createCoreHealthMonitor(options) {
   let running = false;
   let timer = null;
   let inFlight = null;
+  let run = 0;
 
   async function executePoll() {
-    if (inFlight) return inFlight;
-    const operation = (async () => {
+    const pollRun = run;
+    if (inFlight) {
+      if (inFlight.run === pollRun) return inFlight.promise;
+      // Drain the previous run before starting fresh work, preserving no overlap.
+      await inFlight.promise;
+      if (!running || run !== pollRun) return false;
+      return executePoll();
+    }
+    let complete;
+    const promise = new Promise((resolve) => { complete = resolve; });
+    inFlight = { run: pollRun, promise };
+    // Publish the operation before invoking caller code, which may throw.
+    void (async () => {
       try {
         const samples = await config.poll();
         if (!Array.isArray(samples)) {
           throw new TypeError("poll must resolve to an array of health samples");
         }
-        if (running) await config.onSamples(samples);
+        if (running && run === pollRun) await config.onSamples(samples);
         return true;
       } catch (error) {
-        if (running && config.onError) {
+        if (running && run === pollRun && config.onError) {
           try {
             await config.onError(error);
           } catch {
@@ -78,17 +90,17 @@ export function createCoreHealthMonitor(options) {
       } finally {
         inFlight = null;
       }
-    })();
-    inFlight = operation;
-    return operation;
+    })().then(complete);
+    return promise;
   }
 
   function start() {
     if (running) return false;
     running = true;
+    const startedRun = ++run;
     try {
       timer = config.setIntervalImpl(() => {
-        if (running) void executePoll();
+        if (running && run === startedRun) void executePoll();
       }, config.intervalMs);
     } catch (error) {
       running = false;
