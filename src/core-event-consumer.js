@@ -1,5 +1,5 @@
 import { evaluateSentinelEvent, SENTINEL_DEFAULT_RULES } from "./index.js";
-const DEFAULT_TIMEOUT_MS=5000, MAX_TIMEOUT_MS=30000, MAX_CLAIM_LIMIT=100, MIN_LEASE_SECONDS=15, MAX_LEASE_SECONDS=300;
+const DEFAULT_TIMEOUT_MS=5000, MAX_TIMEOUT_MS=30000, MAX_CLAIM_LIMIT=1, MIN_LEASE_SECONDS=15, MAX_LEASE_SECONDS=300;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export const SENTINEL_OUTBOX_EVENT_TYPES=Object.freeze([...new Set(SENTINEL_DEFAULT_RULES.map((rule)=>rule.eventType))]);
 function nonEmpty(value,field){if(typeof value!=="string"||value.trim()==="")throw new TypeError(field+" must be a non-empty string");return value.trim();}
@@ -30,7 +30,7 @@ export function createSentinelCoreEventConsumer(options){
  async function request(path,body){const response=await fetchImpl(baseUrl+path,{method:"POST",headers:{accept:"application/json","content-type":"application/json",authorization:"Bearer "+serviceToken},body:JSON.stringify(body),cache:"no-store",redirect:"error",signal:AbortSignal.timeout(timeoutMs)});return readData(response);}
  async function claim(claimOptions={}){
   if(!claimOptions||typeof claimOptions!=="object"||Array.isArray(claimOptions))throw new TypeError("claim options must be an object");
-  const limit=claimOptions.limit??25,leaseSeconds=claimOptions.leaseSeconds??120;bounded(limit,"limit",1,MAX_CLAIM_LIMIT);bounded(leaseSeconds,"leaseSeconds",MIN_LEASE_SECONDS,MAX_LEASE_SECONDS);
+  const limit=claimOptions.limit??1,leaseSeconds=claimOptions.leaseSeconds??120;bounded(limit,"limit",1,MAX_CLAIM_LIMIT);bounded(leaseSeconds,"leaseSeconds",MIN_LEASE_SECONDS,MAX_LEASE_SECONDS);
   const path="/integrations/servers/"+encodeURIComponent(serverId)+"/events/claim";
   const data=await request(path,{limit,leaseSeconds,eventTypes:SENTINEL_OUTBOX_EVENT_TYPES});if(!Array.isArray(data))throw new TypeError("Core claim response data must be an array");
   return Object.freeze(data.map((row,index)=>normalizeClaim(row,serverId,resolveScope,index)));

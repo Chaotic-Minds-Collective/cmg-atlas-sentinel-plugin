@@ -14,7 +14,7 @@ const consumer = createSentinelCoreEventConsumer({
     serverId: event.serverId
   })
 });
-const claimed = await consumer.claim({ limit: 25, leaseSeconds: 120 });
+const claimed = await consumer.claim({ limit: 1, leaseSeconds: 120 });
 for (const item of claimed) {
   // item.alerts contains metadata-only Sentinel alerts.
   // Persist/deliver idempotently using item.outboxEvent.id.
@@ -27,6 +27,6 @@ Requires an HTTPS Core origin, a `game_event_consumer` service token scoped to t
 
 The client uses bounded timeouts, disables redirects and caching, validates event IDs, lease tokens, server scope and supported event types, then passes a schema-v1 normalized event to the existing `evaluateSentinelEvent` classifier. Alert objects remain metadata-only; provider payloads and player names are not copied into alerts.
 
-Claim and acknowledgement are separate explicit calls. No scheduler, polling loop, persistence, notification delivery, Discord connection, RCON, native ATLAS callback or game mutation is started. The caller owns durable idempotency using the stable Core outbox ID and must acknowledge `delivered` only after durable alert handling succeeds. Failed processing can be released with `acknowledge(item, "failed", errorMessage)`.
+The consumer and processor intentionally allow only one claimed event at a time. Multi-event claims are rejected until a worker can renew every outstanding lease concurrently. Claim and acknowledgement are separate explicit calls. No scheduler, polling loop, persistence, notification delivery, Discord connection, RCON, native ATLAS callback or game mutation is started. The caller owns durable idempotency using the stable Core outbox ID and must acknowledge `delivered` only after durable alert handling succeeds. Failed processing can be released with `acknowledge(item, "failed", errorMessage)`.
 
 Core delivery is at-least-once. A crash after downstream work but before acknowledgement can cause redelivery; exactly-once processing is not claimed. This consumer complements rather than replaces the existing read-only health poller and scheduled health monitor.

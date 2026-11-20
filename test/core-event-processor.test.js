@@ -35,7 +35,7 @@ test("persists each event before acknowledging it as delivered", async () => {
   const persisted = [];
   const result = await processSentinelOutboxBatch({
     consumer,
-    claimOptions: { limit: 10 },
+    claimOptions: { limit: 1 },
     async persistEvent(record) {
       calls.push({ type: "persist", id: record.idempotencyKey });
       persisted.push(record);
@@ -110,22 +110,13 @@ test("leaves a failed event leased when its retry acknowledgement also fails", a
   assert.equal(result[0].status, "retry_pending_lease_expiry");
 });
 
-test("processes claimed events sequentially and continues after a persistence failure", async () => {
-  const { consumer, calls } = fakeConsumer([
-    claimed("outbox-5"),
-    claimed("outbox-6")
-  ]);
-  const result = await processSentinelOutboxBatch({
-    consumer,
-    async persistEvent(record) {
-      calls.push({ type: "persist", id: record.idempotencyKey });
-      if (record.idempotencyKey === "outbox-5") throw new Error("temporary");
-    }
-  });
-
-  assert.deepEqual(result.map((item) => item.status), ["retry_scheduled", "delivered"]);
-  assert.deepEqual(calls.filter((call) => call.type === "persist")
-    .map((call) => call.id), ["outbox-5", "outbox-6"]);
+test("rejects multi-event batches until every outstanding lease can be renewed concurrently", async () => {
+  const { consumer, calls } = fakeConsumer([claimed("outbox-5"), claimed("outbox-6")]);
+  await assert.rejects(
+    processSentinelOutboxBatch({ consumer, async persistEvent() {} }),
+    /at most one event/
+  );
+  assert.deepEqual(calls.map((call) => call.type), ["claim"]);
 });
 
 test("validates required collaborators and claim response", async () => {
