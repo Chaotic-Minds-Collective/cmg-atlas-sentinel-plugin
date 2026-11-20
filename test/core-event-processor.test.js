@@ -112,10 +112,12 @@ test("leaves a failed event leased when its retry acknowledgement also fails", a
 
 test("rejects multi-event batches until every outstanding lease can be renewed concurrently", async () => {
   const { consumer, calls } = fakeConsumer([claimed("outbox-5"), claimed("outbox-6")]);
+  let persisted = 0;
   await assert.rejects(
-    processSentinelOutboxBatch({ consumer, async persistEvent() {} }),
+    processSentinelOutboxBatch({ consumer, async persistEvent() { persisted += 1; } }),
     /at most one event/
   );
+  assert.equal(persisted, 0);
   assert.deepEqual(calls.map((call) => call.type), ["claim"]);
 });
 

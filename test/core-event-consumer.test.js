@@ -11,3 +11,16 @@ test("rejects wrong-server and unsupported event records",async()=>{await assert
 test("does not acknowledge until explicitly requested and uses the claim lease",async()=>{let calls=[];const c=client(async(url,options)=>{calls.push({url,options});return options.body.includes("leaseSeconds")?response([row()]):response({accepted:true,duplicate:false,eventId:EVENT,outcome:"delivered"},202);});const [claimed]=await c.claim();assert.equal(calls.length,1);await c.acknowledge(claimed,"delivered");assert.equal(calls.length,2);assert.deepEqual(JSON.parse(calls[1].options.body),{leaseToken:LEASE,outcome:"delivered"});assert.match(calls[1].url,new RegExp("/events/"+EVENT+"/ack$"));});
 test("reports failed processing attempts without marking them delivered",async()=>{let ack;const c=client(async(_url,options)=>{if(options.body.includes("leaseSeconds"))return response([row()]);ack=JSON.parse(options.body);return response({accepted:true,duplicate:false,eventId:EVENT,outcome:"failed"},202);});const [claimed]=await c.claim();await c.acknowledge(claimed,"failed","alert sink unavailable");assert.deepEqual(ack,{leaseToken:LEASE,outcome:"failed",error:"alert sink unavailable"});});
 test("surfaces lease conflicts and validates URL and request bounds",async()=>{await assert.rejects(client(async()=>response(null,409)).acknowledge({outboxEvent:{id:EVENT,leaseToken:LEASE}},"delivered"),e=>e.status===409&&e.code==="EVENT_LEASE_INVALID");assert.throws(()=>createSentinelCoreEventConsumer({baseUrl:"http://core.example.test",serviceToken:"x",serverId:SERVER,resolveScope:()=>scope}),/HTTPS origin/);await assert.rejects(client(async()=>response([])).claim({limit:101}),/limit must be an integer/);await assert.rejects(client(async()=>response([])).claim({leaseSeconds:10}),/leaseSeconds must be an integer/);});
+
+
+test("defaults to one claimed event when no limit is provided", async () => {
+  let body;
+  const consumer = makeConsumer({
+    fetchImpl: async (url, options) => {
+      body = JSON.parse(options.body);
+      return response(200, { data: [] });
+    }
+  });
+  await consumer.claim();
+  assert.equal(body.limit, 1);
+});
